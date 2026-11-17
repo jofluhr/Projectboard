@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dev-dist/
+coverage/
+*.local
+.env
+.env.*
+!.env.example
+
+# Real board data never belongs in this repo. Keep it in a folder outside the repo.
+data/
+private/

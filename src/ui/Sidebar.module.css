@@ -1,0 +1,163 @@
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+
+.brand {
+  font-weight: 800;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  padding: 4px 8px 14px;
+}
+
+.sectionLabel {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  padding: 6px 8px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.project {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 8px;
+  border-radius: 6px;
+}
+.project:hover {
+  background: var(--surface-2);
+}
+.project[aria-current='true'] {
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-weight: 700;
+}
+
+.key {
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 34px;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.newProject {
+  border: 1px dashed var(--line);
+  background: none;
+  border-radius: 6px;
+  padding: 8px;
+  color: var(--muted);
+  text-align: left;
+  margin-top: 6px;
+}
+.newProject:hover {
+  color: var(--fg);
+  border-color: var(--muted);
+}
+
+.newInput {
+  width: 100%;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--surface);
+  margin-top: 6px;
+}
+
+.invalid {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.invalid strong {
+  color: var(--danger);
+}
+.invalid ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.foot {
+  margin-top: auto;
+  padding: 12px 8px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.linkBtn {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-align: left;
+}
+.linkBtn:hover {
+  color: var(--fg);
+}
+
+@media (max-width: 760px) {
+  .side {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .brand,
+  .sectionLabel,
+  .foot,
+  .count {
+    display: none;
+  }
+  .list {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .project {
+    width: auto;
+  }
+  .newProject,
+  .newInput {
+    margin-top: 0;
+    width: auto;
+  }
+}

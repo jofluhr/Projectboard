@@ -1,0 +1,41 @@
+# Projectboard
+
+A personal project management app: Kanban boards per project and an ideas inbox.
+It is a PWA that stores everything as plain files in a folder on your PC, so the
+data stays local and can also be edited by hand or by tools.
+
+## Requirements
+
+- Microsoft Edge or Google Chrome. The app uses the File System Access API to read and
+  write the data folder; Firefox and Safari do not support it.
+- Node.js 22 for development.
+
+## Use
+
+1. Open the app in Edge and install it (address bar → install icon).
+2. Choose an empty data folder outside this repository. The app creates
+   `settings.json`, `inbox.md`, `README.md` and `projects/` there.
+
+## Data format
+
+- `projects/<id>.json`: one project. Columns in board order, each with its cards in order.
+- `settings.json`: shared labels.
+- `inbox.md`: ideas, one per line as `- YYYY-MM-DD text`.
+
+The schemas live in `src/domain/schema.ts`. Files changed outside the app are picked up
+when the app window gets focus; if the app was saving the same project at that moment,
+the version on disk wins.
+
+## Development
+
+```sh
+npm install
+npm run dev        # http://localhost:5173/projectboard/
+npm test           # unit tests (Vitest)
+npm run build      # type check + production build
+```
+
+In development, `http://localhost:5173/projectboard/?memory` runs the app with an
+in-memory folder (nothing is saved), which is handy for trying the UI.
+
+`docs/prototype/board.html` is the original single-file prototype used as design reference.
