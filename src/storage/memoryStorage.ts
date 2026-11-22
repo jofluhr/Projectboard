@@ -27,6 +27,18 @@ export class MemoryStorage implements Storage {
       .map((p) => p.slice(prefix.length))
   }
 
+  async listDirs(dir: string): Promise<string[]> {
+    const prefix = dir ? `${dir}/` : ''
+    const names = new Set<string>()
+    for (const p of this.files.keys()) {
+      if (!p.startsWith(prefix)) continue
+      const rest = p.slice(prefix.length)
+      const slash = rest.indexOf('/')
+      if (slash > 0) names.add(rest.slice(0, slash))
+    }
+    return [...names]
+  }
+
   async remove(path: string): Promise<void> {
     this.files.delete(path)
   }

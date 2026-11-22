@@ -16,7 +16,11 @@ export const INBOX_FILE = 'inbox.md'
 export const README_FILE = 'README.md'
 export const PROJECTS_DIR = 'projects'
 
-export const projectPath = (id: string) => `${PROJECTS_DIR}/${id}.json`
+/** Each project lives in its own folder, named by the project id. */
+export const projectPath = (id: string) => `${PROJECTS_DIR}/${id}/${id}.json`
+export const notesPath = (id: string) => `${PROJECTS_DIR}/${id}/Notes_${id}.md`
+/** Where projects were stored before they got their own folders. */
+const legacyProjectPath = (id: string) => `${PROJECTS_DIR}/${id}.json`
 
 export interface InvalidFile {
   path: string
@@ -27,6 +31,10 @@ export interface LoadResult {
   projects: LoadedProject[]
   settings: Settings
   invalid: InvalidFile[]
+  /** Notes text per project id. Projects without a notes file are left out. */
+  notes: Record<string, string>
+  /** Number of project files moved from the old flat layout into project folders. */
+  migrated: number
 }
 
 export type SaveResult = { ok: true } | { ok: false; reason: 'conflict' }
@@ -63,8 +71,7 @@ export class Repository {
     await writeIfMissing(SETTINGS_FILE, toJson(defaultSettings()))
     await writeIfMissing(INBOX_FILE, '# Inbox\n\n')
     await writeIfMissing(README_FILE, DATA_README)
-    const existing = (await this.storage.list(PROJECTS_DIR)).filter((f) => f.endsWith('.json'))
-    if (existing.length === 0) {
+    if ((await this.projectIdsOnDisk()).length === 0) {
       await this.storage.write(projectPath('my-first-project'), toJson(newProject('My first project', 'MFP', this.now())))
     }
   }
@@ -72,6 +79,7 @@ export class Repository {
   async loadAll(): Promise<LoadResult> {
     this.seen.clear()
     const invalid: InvalidFile[] = []
+    const migrated = await this.migrateLegacyProjects(invalid)
 
     let settings = defaultSettings()
     const settingsFile = await this.storage.read(SETTINGS_FILE)
@@ -83,33 +91,76 @@ export class Repository {
     }
 
     const projects: LoadedProject[] = []
-    const files = (await this.storage.list(PROJECTS_DIR)).filter((f) => f.endsWith('.json')).sort()
-    for (const file of files) {
-      const path = `${PROJECTS_DIR}/${file}`
+    const notes: Record<string, string> = {}
+    for (const id of (await this.storage.listDirs(PROJECTS_DIR)).sort()) {
+      const path = projectPath(id)
       const content = await this.storage.read(path)
       if (!content) continue
       this.seen.set(path, content.lastModified)
       const parsed = parseJson(content.text, ProjectSchema)
-      if (parsed.ok) projects.push({ ...normalizeProject(parsed.value), id: file.slice(0, -'.json'.length) })
+      if (parsed.ok) projects.push({ ...normalizeProject(parsed.value), id })
       else invalid.push({ path, message: parsed.message })
+
+      const notesFile = await this.storage.read(notesPath(id))
+      if (notesFile) {
+        this.seen.set(notesPath(id), notesFile.lastModified)
+        notes[id] = notesFile.text
+      }
     }
     projects.sort((a, b) => a.name.localeCompare(b.name))
-    return { projects, settings, invalid }
+    return { projects, settings, invalid, notes, migrated }
+  }
+
+  /** Moves `projects/<id>.json` to `projects/<id>/<id>.json`. Never overwrites a file. */
+  private async migrateLegacyProjects(invalid: InvalidFile[]): Promise<number> {
+    let moved = 0
+    for (const file of await this.legacyProjectFiles()) {
+      const id = file.slice(0, -'.json'.length)
+      const from = legacyProjectPath(id)
+      if ((await this.storage.stat(projectPath(id))) !== null) {
+        invalid.push({ path: from, message: `Not moved, because ${projectPath(id)} already exists` })
+        continue
+      }
+      const content = await this.storage.read(from)
+      if (!content) continue
+      await this.storage.write(projectPath(id), content.text)
+      await this.storage.remove(from)
+      moved++
+    }
+    return moved
+  }
+
+  private async legacyProjectFiles(): Promise<string[]> {
+    return (await this.storage.list(PROJECTS_DIR)).filter((f) => f.endsWith('.json'))
+  }
+
+  /** Ids of all project folders plus not yet migrated flat project files. */
+  private async projectIdsOnDisk(): Promise<string[]> {
+    const legacy = (await this.legacyProjectFiles()).map((f) => f.slice(0, -'.json'.length))
+    return [...(await this.storage.listDirs(PROJECTS_DIR)), ...legacy]
   }
 
   /** Writes a project unless its file changed on disk since it was last read or written. */
   async saveProject(project: LoadedProject): Promise<SaveResult> {
-    const path = projectPath(project.id)
+    const { id: _id, ...data } = project
+    return this.saveFile(projectPath(project.id), toJson(data))
+  }
+
+  /** Writes a project's notes (creating the file if needed) unless it changed on disk. */
+  async saveNotes(id: string, text: string): Promise<SaveResult> {
+    return this.saveFile(notesPath(id), text)
+  }
+
+  private async saveFile(path: string, text: string): Promise<SaveResult> {
     const onDisk = await this.storage.stat(path)
     if (onDisk !== (this.seen.get(path) ?? null)) return { ok: false, reason: 'conflict' }
-    const { id: _id, ...data } = project
-    this.seen.set(path, await this.storage.write(path, toJson(data)))
+    this.seen.set(path, await this.storage.write(path, text))
     return { ok: true }
   }
 
   /** Creates a new project file with a unique id (file name) and key. */
   async createProject(name: string, existing: LoadedProject[]): Promise<LoadedProject> {
-    const takenIds = [...existing.map((p) => p.id), ...(await this.storage.list(PROJECTS_DIR)).map((f) => f.replace(/\.json$/, ''))]
+    const takenIds = [...existing.map((p) => p.id), ...(await this.projectIdsOnDisk())]
     const id = uniqueSlug(name, takenIds)
     const key = deriveKey(name, existing.map((p) => p.key))
     const project: LoadedProject = { ...newProject(name, key, this.now()), id }
@@ -118,14 +169,18 @@ export class Repository {
     return project
   }
 
-  /** True if any known file changed or disappeared, or a new project file appeared. */
+  /** True if any known file changed or disappeared, or a new project or notes file appeared. */
   async hasExternalChanges(): Promise<boolean> {
     for (const [path, lastModified] of this.seen) {
       if ((await this.storage.stat(path)) !== lastModified) return true
     }
-    if (!this.seen.has(SETTINGS_FILE) && (await this.storage.stat(SETTINGS_FILE)) !== null) return true
-    const files = await this.storage.list(PROJECTS_DIR)
-    return files.some((f) => f.endsWith('.json') && !this.seen.has(`${PROJECTS_DIR}/${f}`))
+    const isNew = async (path: string) => !this.seen.has(path) && (await this.storage.stat(path)) !== null
+    if (await isNew(SETTINGS_FILE)) return true
+    if ((await this.legacyProjectFiles()).length > 0) return true
+    for (const id of await this.storage.listDirs(PROJECTS_DIR)) {
+      if ((await isNew(projectPath(id))) || (await isNew(notesPath(id)))) return true
+    }
+    return false
   }
 }
 
@@ -151,8 +206,12 @@ the version on disk wins.
 
 - \`settings.json\`: shared labels (id, name, color).
 - \`inbox.md\`: ideas, one per line: \`- YYYY-MM-DD text\`.
-- \`projects/<id>.json\`: one file per project. The file name is the project id.
-  Columns are in board order; each column holds its cards in order.
+- \`projects/<id>/\`: one folder per project. The folder name is the project id
+  and never changes, even if the project is renamed.
+  - \`<id>.json\`: the board. Columns are in board order; each column holds its
+    cards in order.
+  - \`Notes_<id>.md\`: free-form notes in Markdown. Created when notes are
+    first written.
   Card numbers (\`num\`) must be unique within a project; \`nextNumber\` is the
   number the next new card gets.
 

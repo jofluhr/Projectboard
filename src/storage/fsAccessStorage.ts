@@ -57,6 +57,14 @@ export class FsAccessStorage implements Storage {
   }
 
   async list(dirPath: string): Promise<string[]> {
+    return this.entries(dirPath, 'file')
+  }
+
+  async listDirs(dirPath: string): Promise<string[]> {
+    return this.entries(dirPath, 'directory')
+  }
+
+  private async entries(dirPath: string, kind: FileSystemHandleKind): Promise<string[]> {
     let dir: FileSystemDirectoryHandle
     try {
       dir = await this.dir(dirPath.split('/').filter(Boolean), false)
@@ -66,7 +74,7 @@ export class FsAccessStorage implements Storage {
     }
     const names: string[] = []
     for await (const [name, handle] of dir.entries()) {
-      if (handle.kind === 'file') names.push(name)
+      if (handle.kind === kind) names.push(name)
     }
     return names
   }

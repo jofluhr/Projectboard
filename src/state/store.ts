@@ -23,6 +23,8 @@ interface AppState {
   projects: LoadedProject[]
   settings: Settings
   invalid: InvalidFile[]
+  /** Notes text per project id; missing means the project has no notes file yet. */
+  notes: Record<string, string>
   activeId: string | null
   toast: Toast | null
 
@@ -34,6 +36,8 @@ interface AppState {
   createProject(name: string): Promise<void>
   /** Applies `change` right away and saves the project in the background. */
   updateProject(id: string, change: (p: Project) => Project): void
+  /** Sets the notes right away and saves them in the background. */
+  saveNotes(id: string, text: string): void
   showToast(text: string): void
 }
 
@@ -63,11 +67,12 @@ export const useStore = create<AppState>()((set, get) => {
 
   async function reload(notice?: string) {
     if (!repo) return
-    const { projects, settings, invalid } = await repo.loadAll()
+    const { projects, settings, invalid, notes, migrated } = await repo.loadAll()
     const visible = projects.filter((p) => !p.archived)
     const current = get().activeId
     const activeId = visible.some((p) => p.id === current) ? current : (visible[0]?.id ?? null)
-    set({ projects, settings, invalid, activeId })
+    set({ projects, settings, invalid, notes, activeId })
+    if (migrated > 0) notice = `Moved ${migrated} project file${migrated === 1 ? '' : 's'} into project folders.`
     if (notice) get().showToast(notice)
   }
 
@@ -77,6 +82,7 @@ export const useStore = create<AppState>()((set, get) => {
     projects: [],
     settings: defaultSettings(),
     invalid: [],
+    notes: {},
     activeId: null,
     toast: null,
 
@@ -161,6 +167,23 @@ export const useStore = create<AppState>()((set, get) => {
           if (!result.ok) await reload(`"${latest.name}" was changed outside the app. Reloaded from disk; your last change was not saved.`)
         } catch (e) {
           get().showToast(`Could not save "${latest.name}": ${errorMessage(e)}`)
+        }
+      })
+    },
+
+    saveNotes(id, text) {
+      if ((get().notes[id] ?? '') === text) return
+      set((s) => ({ notes: { ...s.notes, [id]: text } }))
+
+      saveQueue = saveQueue.then(async () => {
+        const latest = get().notes[id]
+        const name = get().projects.find((p) => p.id === id)?.name ?? id
+        if (!repo || latest === undefined) return
+        try {
+          const result = await repo.saveNotes(id, latest)
+          if (!result.ok) await reload(`The notes of "${name}" were changed outside the app. Reloaded from disk; your last change was not saved.`)
+        } catch (e) {
+          get().showToast(`Could not save the notes of "${name}": ${errorMessage(e)}`)
         }
       })
     },

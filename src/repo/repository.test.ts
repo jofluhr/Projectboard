@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { addCard } from '../domain/ops'
 import { MemoryStorage } from '../storage/memoryStorage'
-import { INBOX_FILE, projectPath, README_FILE, Repository, SETTINGS_FILE } from './repository'
+import { INBOX_FILE, notesPath, projectPath, README_FILE, Repository, SETTINGS_FILE } from './repository'
 
 const NOW = new Date('2026-03-10T09:00:00Z')
 
@@ -139,5 +139,81 @@ describe('createProject', () => {
     expect([a.id, a.key]).toEqual(['website', 'WEB'])
     expect([b.id, b.key]).toEqual(['website-2', 'WEB2'])
     expect((await repo.loadAll()).projects).toHaveLength(3)
+  })
+})
+
+describe('project folders', () => {
+  it('keeps each project in its own folder named by the id', async () => {
+    await repo.initialize()
+    const a = await repo.createProject('Website', (await repo.loadAll()).projects)
+    expect(projectPath(a.id)).toBe('projects/website/website.json')
+    expect(storage.files.has('projects/website/website.json')).toBe(true)
+  })
+
+  it('moves flat project files from the old layout into folders', async () => {
+    await repo.initialize()
+    const text = storage.files.get(projectPath('my-first-project'))!.text
+    await storage.remove(projectPath('my-first-project'))
+    await storage.write('projects/old.json', text)
+
+    expect(await repo.hasExternalChanges()).toBe(true)
+    const { projects, migrated, invalid } = await repo.loadAll()
+    expect(migrated).toBe(1)
+    expect(invalid).toEqual([])
+    expect(projects.map((p) => p.id)).toEqual(['old'])
+    expect(storage.files.has('projects/old.json')).toBe(false)
+    expect(storage.files.get(projectPath('old'))!.text).toBe(text)
+    expect((await repo.loadAll()).migrated).toBe(0)
+  })
+
+  it('never overwrites a project folder while migrating', async () => {
+    await repo.initialize()
+    await storage.write('projects/my-first-project.json', '{}')
+    const { migrated, invalid } = await repo.loadAll()
+    expect(migrated).toBe(0)
+    expect(invalid.map((i) => i.path)).toEqual(['projects/my-first-project.json'])
+    expect(storage.files.has('projects/my-first-project.json')).toBe(true)
+  })
+})
+
+describe('notes', () => {
+  beforeEach(() => repo.initialize())
+
+  it('creates the notes file on the first save and reads it back', async () => {
+    const { projects, notes } = await repo.loadAll()
+    const id = projects[0]!.id
+    expect(notes).toEqual({})
+    expect(storage.files.has(notesPath(id))).toBe(false)
+
+    expect(await repo.saveNotes(id, '# Goals\n')).toEqual({ ok: true })
+    expect(notesPath(id)).toBe(`projects/${id}/Notes_${id}.md`)
+    expect(storage.files.get(notesPath(id))!.text).toBe('# Goals\n')
+    expect(await repo.hasExternalChanges()).toBe(false)
+
+    const fresh = new Repository(storage, () => NOW)
+    expect((await fresh.loadAll()).notes).toEqual({ [id]: '# Goals\n' })
+  })
+
+  it('keeps an emptied notes file', async () => {
+    const id = (await repo.loadAll()).projects[0]!.id
+    await repo.saveNotes(id, 'text')
+    await repo.saveNotes(id, '')
+    expect(storage.files.get(notesPath(id))!.text).toBe('')
+  })
+
+  it('detects new and edited notes files and lets the disk win', async () => {
+    const id = (await repo.loadAll()).projects[0]!.id
+
+    await storage.write(notesPath(id), 'written elsewhere')
+    expect(await repo.hasExternalChanges()).toBe(true)
+    expect(await repo.saveNotes(id, 'mine')).toEqual({ ok: false, reason: 'conflict' })
+
+    expect((await repo.loadAll()).notes[id]).toBe('written elsewhere')
+    expect(await repo.hasExternalChanges()).toBe(false)
+
+    await storage.write(notesPath(id), 'edited again')
+    expect(await repo.hasExternalChanges()).toBe(true)
+    expect(await repo.saveNotes(id, 'mine')).toEqual({ ok: false, reason: 'conflict' })
+    expect(storage.files.get(notesPath(id))!.text).toBe('edited again')
   })
 })

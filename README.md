@@ -18,7 +18,13 @@ data stays local and can also be edited by hand or by tools.
 
 ## Data format
 
-- `projects/<id>.json`: one project. Columns in board order, each with its cards in order.
+- `projects/<id>/`: one folder per project, named by the project id (it never changes).
+  - `<id>.json`: the board. Columns in board order, each with its cards in order.
+  - `Notes_<id>.md`: the project's notes in Markdown, created when notes are first written.
+    The "Notes" button between the project header and the board shows and edits them.
+
+Data folders from before project folders existed (`projects/<id>.json`) are moved to the
+new layout automatically when the app opens them.
 - `settings.json`: shared labels.
 - `inbox.md`: ideas, one per line as `- YYYY-MM-DD text`.
 

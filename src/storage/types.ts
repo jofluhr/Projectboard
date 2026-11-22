@@ -14,6 +14,8 @@ export interface Storage {
   stat(path: string): Promise<number | null>
   /** File names (not folders) directly inside `dir`; empty if `dir` does not exist. */
   list(dir: string): Promise<string[]>
+  /** Folder names directly inside `dir`; empty if `dir` does not exist. */
+  listDirs(dir: string): Promise<string[]>
   remove(path: string): Promise<void>
 }
 
