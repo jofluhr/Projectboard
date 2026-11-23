@@ -83,8 +83,8 @@ export const TimeCategorySchema = z.object({
 })
 
 const DEFAULT_TIME_CATEGORIES = [
-  { id: 'fortbildung', name: 'Fortbildung' },
-  { id: 'sonstiges', name: 'Sonstiges' },
+  { id: 'training', name: 'Training' },
+  { id: 'other', name: 'Other' },
 ]
 
 export const SettingsSchema = z.object({
