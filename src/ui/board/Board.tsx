@@ -14,6 +14,7 @@ import {
 } from '@dnd-kit/core'
 import { arrayMove, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import { useMemo, useState } from 'react'
+import { cardMatches, isFiltering, type CardFilter } from '../../domain/filter'
 import { addCard, addColumn, isOverWip, locateCard, moveCard, updateColumn } from '../../domain/ops'
 import type { Card, LoadedProject, Project } from '../../domain/schema'
 import { useStore } from '../../state/store'
@@ -35,7 +36,13 @@ function containerOf(id: UniqueIdentifier, layout: Layout): number | null {
 
 const layoutOf = (p: Project): Layout => p.columns.map((c) => c.cards.map((card) => card.num))
 
-export function Board({ project }: { project: LoadedProject }) {
+interface Props {
+  project: LoadedProject
+  filter: CardFilter
+  onOpen(num: number): void
+}
+
+export function Board({ project, filter, onOpen }: Props) {
   const updateProject = useStore((s) => s.updateProject)
   const showToast = useStore((s) => s.showToast)
   const labels = useStore((s) => s.settings.labels)
@@ -50,11 +57,17 @@ export function Board({ project }: { project: LoadedProject }) {
     () => new Map<number, Card>(project.columns.flatMap((c) => c.cards).map((c) => [c.num, c])),
     [project],
   )
+  const filtering = isFiltering(filter)
+  const visible = (card: Card) => cardMatches(card, project.key, filter)
   const update = (change: (p: Project) => Project) => updateProject(project.id, change)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    // Only Space starts a keyboard drag; Enter opens the card.
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      keyboardCodes: { start: ['Space'], cancel: ['Escape'], end: ['Space', 'Enter'] },
+    }),
   )
 
   const cardName = (id: UniqueIdentifier) => {
@@ -118,6 +131,8 @@ export function Board({ project }: { project: LoadedProject }) {
     const target = project.columns[toCol]!
     if (start.col !== toCol && isOverWip(target, column.length)) {
       showToast(`${target.name} is over its WIP limit (${column.length}/${target.wipLimit}).`)
+    } else if (target.done && !project.columns[start.col]!.done) {
+      showToast(`${project.key}-${num} done`)
     }
   }
 
@@ -158,6 +173,9 @@ export function Board({ project }: { project: LoadedProject }) {
             cards={cards}
             projectKey={project.key}
             labels={labels}
+            visible={visible}
+            filtering={filtering}
+            onOpen={onOpen}
             editing={editingColumn === i}
             onEdit={(editing) => setEditingColumn(editing ? i : null)}
             onSave={(patch) => update((p) => updateColumn(p, i, patch))}

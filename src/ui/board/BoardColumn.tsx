@@ -15,15 +15,24 @@ interface Props {
   cards: Map<number, Card>
   projectKey: string
   labels: Label[]
+  /** Whether a card passes the toolbar filter. Hidden cards keep their place in the column. */
+  visible(card: Card): boolean
+  filtering: boolean
+  onOpen(num: number): void
   editing: boolean
   onEdit(editing: boolean): void
   onSave(patch: { name: string; wipLimit: number }): void
   onAddCard(title: string): void
 }
 
-export function BoardColumn({ index, column, nums, cards, projectKey, labels, editing, onEdit, onSave, onAddCard }: Props) {
+export function BoardColumn(props: Props) {
+  const { index, column, nums, cards, projectKey, labels, visible, filtering, onOpen, editing, onEdit, onSave, onAddCard } = props
   const { setNodeRef } = useDroppable({ id: columnDndId(index) })
   const over = isOverWip(column, nums.length)
+  const shown = nums.filter((num) => {
+    const card = cards.get(num)
+    return card !== undefined && visible(card)
+  })
 
   return (
     <section className={`${styles.column} ${over ? styles.over : ''}`} aria-label={column.name}>
@@ -47,13 +56,21 @@ export function BoardColumn({ index, column, nums, cards, projectKey, labels, ed
         </header>
       )}
 
-      <SortableContext items={nums.map(cardDndId)} strategy={verticalListSortingStrategy}>
+      <SortableContext items={shown.map(cardDndId)} strategy={verticalListSortingStrategy}>
         <div ref={setNodeRef} className={styles.cards}>
-          {nums.map((num) => {
-            const card = cards.get(num)
-            return card ? <SortableCard key={num} card={card} projectKey={projectKey} labels={labels} done={column.done} /> : null
-          })}
-          {nums.length === 0 && <div className={styles.empty}>Drop cards here</div>}
+          {shown.map((num) => (
+            <SortableCard
+              key={num}
+              card={cards.get(num)!}
+              projectKey={projectKey}
+              labels={labels}
+              done={column.done}
+              onOpen={() => onOpen(num)}
+            />
+          ))}
+          {shown.length === 0 && (
+            <div className={styles.empty}>{nums.length > 0 && filtering ? 'No cards match the filter' : 'Drop cards here'}</div>
+          )}
         </div>
       </SortableContext>
 
@@ -62,15 +79,25 @@ export function BoardColumn({ index, column, nums, cards, projectKey, labels, ed
   )
 }
 
-function SortableCard(props: { card: Card; projectKey: string; labels: Label[]; done: boolean }) {
+function SortableCard({ onOpen, ...props }: { card: Card; projectKey: string; labels: Label[]; done: boolean; onOpen(): void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: cardDndId(props.card.num) })
   return (
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={isDragging ? styles.placeholder : undefined}
+      data-card-num={props.card.num}
       {...attributes}
+      aria-roledescription="card"
+      aria-label={`${props.projectKey}-${props.card.num} ${props.card.title}`}
       {...listeners}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !isDragging) {
+          e.preventDefault()
+          onOpen()
+        } else listeners?.onKeyDown?.(e)
+      }}
     >
       <CardTile {...props} />
     </div>

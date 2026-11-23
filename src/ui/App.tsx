@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../state/store'
 import styles from './App.module.css'
-import { Board } from './board/Board'
+import { ProjectView } from './board/ProjectView'
 import { NotesPanel } from './notes/NotesPanel'
 import { ProjectHeader } from './ProjectHeader'
 import { Sidebar } from './Sidebar'
@@ -67,7 +67,7 @@ function Workspace() {
             <ProjectHeader project={project} />
             <NotesPanel key={project.id} projectId={project.id} open={notesOpen} onToggle={() => setNotesOpen((o) => !o)} />
             <div className={styles.view}>
-              <Board key={project.id} project={project} />
+              <ProjectView key={project.id} project={project} />
             </div>
           </>
         ) : (

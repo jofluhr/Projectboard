@@ -76,6 +76,22 @@ export function moveCard(p: Project, num: number, toCol: number, toIndex: number
   return { ...p, columns }
 }
 
+export type CardPatch = Partial<Pick<Card, 'title' | 'description' | 'priority' | 'labels' | 'due' | 'checklist'>>
+
+export function updateCard(p: Project, num: number, patch: CardPatch): Project {
+  if (!locateCard(p, num)) return p
+  return {
+    ...p,
+    columns: p.columns.map((c) => ({ ...c, cards: c.cards.map((card) => (card.num === num ? { ...card, ...patch } : card)) })),
+  }
+}
+
+export function deleteCard(p: Project, num: number): Project {
+  const at = locateCard(p, num)
+  if (!at) return p
+  return { ...p, columns: p.columns.map((c, i) => (i === at.col ? { ...c, cards: c.cards.filter((card) => card.num !== num) } : c)) }
+}
+
 export function updateColumn(p: Project, colIndex: number, patch: Partial<Pick<Column, 'name' | 'wipLimit'>>): Project {
   return { ...p, columns: p.columns.map((c, i) => (i === colIndex ? { ...c, ...patch } : c)) }
 }

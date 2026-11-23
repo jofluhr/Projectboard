@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addCard, addColumn, isOverWip, moveCard, newProject, normalizeProject, projectStats } from './ops'
+import { addCard, addColumn, deleteCard, isOverWip, moveCard, newProject, normalizeProject, projectStats, updateCard } from './ops'
 import type { Project } from './schema'
 
 const NOW = new Date('2026-03-10T09:00:00Z')
@@ -98,5 +98,39 @@ describe('normalizeProject', () => {
   it('raises nextNumber above the highest card number', () => {
     const p = { ...sample(), nextNumber: 2 }
     expect(normalizeProject(p).nextNumber).toBe(5)
+  })
+})
+
+describe('updateCard', () => {
+  it('changes only the given fields of the given card', () => {
+    const p = updateCard(sample(), 2, { title: 'Renamed', priority: 'high', checklist: [{ text: 'Step', done: true }] })
+    const card = p.columns[0]!.cards[1]!
+    expect(card).toMatchObject({ num: 2, title: 'Renamed', priority: 'high', checklist: [{ text: 'Step', done: true }] })
+    expect(p.columns[0]!.cards[0]!.title).toBe('First')
+  })
+
+  it('returns the project unchanged for an unknown card', () => {
+    const p = sample()
+    expect(updateCard(p, 99, { title: 'X' })).toBe(p)
+  })
+
+  it('does not mutate its input', () => {
+    const p = sample()
+    const copy = structuredClone(p)
+    updateCard(p, 1, { labels: ['bug'] })
+    expect(p).toEqual(copy)
+  })
+})
+
+describe('deleteCard', () => {
+  it('removes the card and keeps the numbering', () => {
+    const p = deleteCard(sample(), 2)
+    expect(nums(p)).toEqual([[1, 3], [4], []])
+    expect(p.nextNumber).toBe(5)
+  })
+
+  it('returns the project unchanged for an unknown card', () => {
+    const p = sample()
+    expect(deleteCard(p, 99)).toBe(p)
   })
 })
