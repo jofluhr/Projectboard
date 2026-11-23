@@ -42,12 +42,12 @@ the version on disk wins.
 
 ```sh
 npm install
-npm run dev        # http://localhost:5173/projectboard/
+npm run dev        # http://localhost:5173/Projectboard/
 npm test           # unit tests (Vitest)
 npm run build      # type check + production build
 ```
 
-In development, `http://localhost:5173/projectboard/?memory` runs the app with an
+In development, `http://localhost:5173/Projectboard/?memory` runs the app with an
 in-memory folder (nothing is saved), which is handy for trying the UI.
 
 `docs/prototype/board.html` is the original single-file prototype used as design reference.

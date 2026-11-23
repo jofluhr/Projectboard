@@ -2,8 +2,8 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
-// Served from GitHub Pages under /projectboard/.
-const base = '/projectboard/'
+// Served from GitHub Pages under /Projectboard/.
+const base = '/Projectboard/'
 
 export default defineConfig({
   base,
