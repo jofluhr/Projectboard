@@ -188,6 +188,24 @@
   opacity: 0.35;
 }
 
+.dragHandle {
+  cursor: grab;
+}
+.dragHandle:active {
+  cursor: grabbing;
+}
+.dragHandle .columnName {
+  cursor: pointer;
+}
+
+.columnLifted {
+  cursor: grabbing;
+  box-shadow: var(--shadow-lift);
+  transform: rotate(1.5deg);
+  max-height: 70vh;
+  overflow: hidden;
+}
+
 .lifted {
   cursor: grabbing;
   box-shadow: var(--shadow-lift);

@@ -96,6 +96,16 @@ export function updateColumn(p: Project, colIndex: number, patch: Partial<Pick<C
   return { ...p, columns: p.columns.map((c, i) => (i === colIndex ? { ...c, ...patch } : c)) }
 }
 
+/** Moves the column at `from` to position `to`; its cards and settings go with it. */
+export function moveColumn(p: Project, from: number, to: number): Project {
+  const n = p.columns.length
+  if (from === to || from < 0 || to < 0 || from >= n || to >= n) return p
+  const columns = [...p.columns]
+  const [col] = columns.splice(from, 1)
+  columns.splice(to, 0, col!)
+  return { ...p, columns }
+}
+
 /** Adds an empty column in front of the first "done" column, or at the end. */
 export function addColumn(p: Project, name: string): { project: Project; index: number } {
   const firstDone = p.columns.findIndex((c) => c.done)

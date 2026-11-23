@@ -1,12 +1,12 @@
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useState, type FocusEvent } from 'react'
+import { useState, type FocusEvent, type KeyboardEventHandler, type PointerEventHandler } from 'react'
 import { isOverWip } from '../../domain/ops'
 import type { Card, Column, Label } from '../../domain/schema'
 import styles from './Board.module.css'
 import { CardTile } from './CardTile'
-import { cardDndId, columnDndId } from './dndIds'
+import { cardDndId, columnDndId, columnSortId } from './dndIds'
 
 interface Props {
   index: number
@@ -28,19 +28,42 @@ interface Props {
 export function BoardColumn(props: Props) {
   const { index, column, nums, cards, projectKey, labels, visible, filtering, onOpen, editing, onEdit, onSave, onAddCard } = props
   const { setNodeRef } = useDroppable({ id: columnDndId(index) })
+  // The column itself is sortable and is dragged by its header.
+  const sortable = useSortable({ id: columnSortId(index), disabled: editing })
   const over = isOverWip(column, nums.length)
+  // dnd-kit types its listeners loosely; these are the pointer and keyboard sensor activators.
+  const handlers = sortable.listeners as
+    | { onPointerDown?: PointerEventHandler<HTMLElement>; onKeyDown?: KeyboardEventHandler<HTMLElement> }
+    | undefined
   const shown = nums.filter((num) => {
     const card = cards.get(num)
     return card !== undefined && visible(card)
   })
 
   return (
-    <section className={`${styles.column} ${over ? styles.over : ''}`} aria-label={column.name}>
+    <section
+      ref={sortable.setNodeRef}
+      style={{ transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition }}
+      className={`${styles.column} ${over ? styles.over : ''} ${sortable.isDragging ? styles.placeholder : ''}`}
+      aria-label={column.name}
+    >
       {editing ? (
         <ColumnEditor column={column} onDone={(patch) => (patch && onSave(patch), onEdit(false))} />
       ) : (
-        <header className={styles.columnHead}>
-          <button type="button" className={styles.columnName} title="Rename column or set WIP limit" onClick={() => onEdit(true)}>
+        // Pointer drags start anywhere on the header; keyboard drags (Space) on the name button.
+        <header className={`${styles.columnHead} ${styles.dragHandle}`} onPointerDown={handlers?.onPointerDown}>
+          <button
+            type="button"
+            ref={sortable.setActivatorNodeRef}
+            className={styles.columnName}
+            title="Click to rename · drag the header to move the column"
+            {...sortable.attributes}
+            aria-roledescription="column"
+            onKeyDown={handlers?.onKeyDown}
+            // Space starts a keyboard drag and must not also open the rename editor.
+            onKeyUp={(e) => e.key === ' ' && e.preventDefault()}
+            onClick={() => onEdit(true)}
+          >
             {column.name}
           </button>
           <span className={`${styles.count} mono`} title={column.wipLimit ? 'Cards / WIP limit' : 'Cards'}>
@@ -202,5 +225,25 @@ function Composer({ onAdd }: { onAdd(title: string): void }) {
         <span className={styles.hint}>Enter adds · Esc cancels</span>
       </div>
     </div>
+  )
+}
+
+/** Static copy of a column shown under the pointer while the column is dragged. */
+export function ColumnPreview({ column, projectKey, labels }: { column: Column; projectKey: string; labels: Label[] }) {
+  return (
+    <section className={`${styles.column} ${styles.columnLifted}`} aria-hidden="true">
+      <header className={styles.columnHead}>
+        <span className={styles.columnName}>{column.name}</span>
+        <span className={`${styles.count} mono`}>
+          {column.cards.length}
+          {column.wipLimit ? `/${column.wipLimit}` : ''}
+        </span>
+      </header>
+      <div className={styles.cards}>
+        {column.cards.map((card) => (
+          <CardTile key={card.num} card={card} projectKey={projectKey} labels={labels} done={column.done} />
+        ))}
+      </div>
+    </section>
   )
 }

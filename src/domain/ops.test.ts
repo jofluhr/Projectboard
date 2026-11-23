@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addCard, addColumn, deleteCard, isOverWip, moveCard, newProject, normalizeProject, projectStats, updateCard } from './ops'
+import { addCard, addColumn, deleteCard, isOverWip, moveCard, moveColumn, newProject, normalizeProject, projectStats, updateCard } from './ops'
 import type { Project } from './schema'
 
 const NOW = new Date('2026-03-10T09:00:00Z')
@@ -132,5 +132,34 @@ describe('deleteCard', () => {
   it('returns the project unchanged for an unknown card', () => {
     const p = sample()
     expect(deleteCard(p, 99)).toBe(p)
+  })
+})
+
+describe('moveColumn', () => {
+  it('moves a column with its cards and settings', () => {
+    const p = moveColumn(sample(), 1, 2)
+    expect(p.columns.map((c) => c.name)).toEqual(['To Do', 'Done', 'In Progress'])
+    expect(nums(p)).toEqual([[1, 2, 3], [], [4]])
+    expect(p.columns[1]!.done).toBe(true)
+    expect(p.columns[2]!.wipLimit).toBe(3)
+  })
+
+  it('moves a done column to the front', () => {
+    const p = moveColumn(sample(), 2, 0)
+    expect(p.columns.map((c) => c.name)).toEqual(['Done', 'To Do', 'In Progress'])
+  })
+
+  it('returns the project unchanged for the same or out-of-range indices', () => {
+    const p = sample()
+    expect(moveColumn(p, 1, 1)).toBe(p)
+    expect(moveColumn(p, -1, 0)).toBe(p)
+    expect(moveColumn(p, 0, 3)).toBe(p)
+  })
+
+  it('does not mutate its input', () => {
+    const p = sample()
+    const copy = structuredClone(p)
+    moveColumn(p, 0, 2)
+    expect(p).toEqual(copy)
   })
 })
