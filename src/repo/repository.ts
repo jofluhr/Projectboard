@@ -2,13 +2,17 @@ import type { z } from 'zod'
 import { CanvasSchema, emptyCanvas, type LoadedWhiteboard } from '../domain/canvas'
 import { newProject, normalizeProject } from '../domain/ops'
 import { deriveKey, sameFileName, sanitizeFileName, uniqueSlug } from '../domain/naming'
+import { monthKey, overlappingKeys, sortEntries } from '../domain/time'
 import {
   defaultSettings,
   formatIssues,
   ProjectSchema,
+  SCHEMA_VERSION,
   SettingsSchema,
+  TimeMonthSchema,
   type LoadedProject,
   type Settings,
+  type TimeEntry,
 } from '../domain/schema'
 import type { Storage } from '../storage/types'
 
@@ -26,6 +30,10 @@ const CANVAS_EXT = '.canvas'
 /** A whiteboard's file name is its name; archived boards live in a subfolder. */
 export const whiteboardPath = (name: string, archived = false) =>
   `${archived ? ARCHIVED_WHITEBOARDS_DIR : WHITEBOARDS_DIR}/${name}${CANVAS_EXT}`
+export const TIME_DIR = 'time'
+/** Time entries are stored in one file per month, e.g. time/2026-11.json. */
+export const timeMonthPath = (month: string) => `${TIME_DIR}/${month}.json`
+const TIME_FILE = /^(\d{4}-\d{2})\.json$/
 /** Where projects were stored before they got their own folders. */
 const legacyProjectPath = (id: string) => `${PROJECTS_DIR}/${id}.json`
 
@@ -44,6 +52,10 @@ export interface LoadResult {
   migrated: number
   /** Active and archived whiteboards, sorted by name. */
   whiteboards: LoadedWhiteboard[]
+  /** Time entries of all months, sorted by date and start. */
+  timeEntries: TimeEntry[]
+  /** Files that were loaded but need attention (e.g. overlapping time entries). */
+  warnings: InvalidFile[]
 }
 
 export type SaveResult = { ok: true } | { ok: false; reason: 'conflict' }
@@ -136,7 +148,51 @@ export class Repository {
       }
     }
     whiteboards.sort((a, b) => a.name.localeCompare(b.name))
-    return { projects, settings, invalid, notes, migrated, whiteboards }
+
+    const timeEntries: TimeEntry[] = []
+    const warnings: InvalidFile[] = []
+    for (const month of await this.timeMonthsOnDisk()) {
+      const path = timeMonthPath(month)
+      const content = await this.storage.read(path)
+      if (!content) continue
+      this.seen.set(path, content.lastModified)
+      const parsed = parseJson(content.text, TimeMonthSchema)
+      if (!parsed.ok) {
+        invalid.push({ path, message: parsed.message })
+        continue
+      }
+      const stray = parsed.value.entries.find((e) => monthKey(e.date) !== month)
+      if (stray) {
+        invalid.push({ path, message: `The entry on ${stray.date} belongs in ${timeMonthPath(monthKey(stray.date))}` })
+        continue
+      }
+      timeEntries.push(...parsed.value.entries)
+      if (overlappingKeys(parsed.value.entries).size > 0) warnings.push({ path, message: 'has overlapping entries' })
+    }
+    return { projects, settings, invalid, notes, migrated, whiteboards, timeEntries: sortEntries(timeEntries), warnings }
+  }
+
+  private async timeMonthsOnDisk(): Promise<string[]> {
+    return (await this.storage.list(TIME_DIR))
+      .map((f) => TIME_FILE.exec(f)?.[1])
+      .filter((m): m is string => m !== undefined)
+      .sort()
+  }
+
+  /**
+   * Writes the entries of one month ("YYYY-MM") unless the file changed on disk.
+   * Without entries the file is removed, so empty months leave no files behind.
+   */
+  async saveTimeMonth(month: string, entries: TimeEntry[]): Promise<SaveResult> {
+    const path = timeMonthPath(month)
+    if (entries.length > 0) {
+      return this.saveFile(path, toJson({ schemaVersion: SCHEMA_VERSION, entries: sortEntries(entries) }))
+    }
+    const onDisk = await this.storage.stat(path)
+    if (onDisk !== (this.seen.get(path) ?? null)) return { ok: false, reason: 'conflict' }
+    if (onDisk !== null) await this.storage.remove(path)
+    this.seen.delete(path)
+    return { ok: true }
   }
 
   private async whiteboardNamesOnDisk(archived: boolean): Promise<string[]> {
@@ -298,6 +354,9 @@ export class Repository {
         if (await isNew(whiteboardPath(name, archived))) return true
       }
     }
+    for (const month of await this.timeMonthsOnDisk()) {
+      if (await isNew(timeMonthPath(month))) return true
+    }
     return false
   }
 }
@@ -322,7 +381,8 @@ edited by hand or by tools, also while the app is open. The app notices changes
 when its window gets focus; if it was editing the same project at that moment,
 the version on disk wins.
 
-- \`settings.json\`: shared labels (id, name, color).
+- \`settings.json\`: shared labels (id, name, color) and \`timeCategories\`
+  (id, name): things to book time on that are not projects.
 - \`inbox.md\`: ideas, one per line: \`- YYYY-MM-DD text\`.
 - \`projects/<id>/\`: one folder per project. The folder name is the project id
   and never changes, even if the project is renamed.
@@ -335,6 +395,11 @@ the version on disk wins.
 - \`whiteboards/<name>.canvas\`: brainstorming boards in the open JSON Canvas
   format (jsoncanvas.org), so they also open in other canvas tools. The file
   name is the board name. Archived boards are in \`whiteboards/archived/\`.
+- \`time/YYYY-MM.json\`: tracked time, one file per month. Each entry has
+  \`date\` (YYYY-MM-DD, inside that month), \`start\` and \`end\` (HH:MM, end
+  after start, same day), either \`project\` (project id) or \`category\`
+  (id from \`timeCategories\`), and an optional \`note\`. Entries of one day
+  must not overlap; touching is fine (10:00-12:00 and 12:00-14:00).
 
 Tip: make this folder a local git repository to keep a history of every change.
 `

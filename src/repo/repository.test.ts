@@ -1,7 +1,18 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { addCard } from '../domain/ops'
 import { MemoryStorage } from '../storage/memoryStorage'
-import { ConflictError, INBOX_FILE, notesPath, projectPath, README_FILE, Repository, SETTINGS_FILE, whiteboardPath } from './repository'
+import {
+  ConflictError,
+  INBOX_FILE,
+  notesPath,
+  projectPath,
+  README_FILE,
+  Repository,
+  SETTINGS_FILE,
+  timeMonthPath,
+  whiteboardPath,
+} from './repository'
+import type { TimeEntry } from '../domain/schema'
 import { addCard as addCanvasCard } from '../domain/canvasOps'
 
 const NOW = new Date('2026-03-10T09:00:00Z')
@@ -305,5 +316,68 @@ describe('whiteboards', () => {
     expect(await repo.hasExternalChanges()).toBe(false)
     await storage.write(whiteboardPath('From elsewhere', true), '{}')
     expect(await repo.hasExternalChanges()).toBe(true)
+  })
+})
+
+describe('time entries', () => {
+  beforeEach(() => repo.initialize())
+
+  const entry = (date: string, start: string, end: string): TimeEntry => ({ date, start, end, project: 'example', note: '' })
+
+  it('round-trips a month, sorted by date and start', async () => {
+    await repo.loadAll()
+    const entries = [entry('2026-03-11', '09:00', '10:00'), entry('2026-03-10', '13:00', '14:00'), entry('2026-03-10', '08:00', '09:00')]
+    expect(await repo.saveTimeMonth('2026-03', entries)).toEqual({ ok: true })
+
+    const { timeEntries, invalid, warnings } = await new Repository(storage, () => NOW).loadAll()
+    expect(invalid).toEqual([])
+    expect(warnings).toEqual([])
+    expect(timeEntries.map((e) => `${e.date} ${e.start}`)).toEqual(['2026-03-10 08:00', '2026-03-10 13:00', '2026-03-11 09:00'])
+  })
+
+  it('removes the month file when its last entry is gone', async () => {
+    await repo.loadAll()
+    await repo.saveTimeMonth('2026-03', [entry('2026-03-10', '08:00', '09:00')])
+    expect(storage.files.has(timeMonthPath('2026-03'))).toBe(true)
+    expect(await repo.saveTimeMonth('2026-03', [])).toEqual({ ok: true })
+    expect(storage.files.has(timeMonthPath('2026-03'))).toBe(false)
+    expect(await repo.hasExternalChanges()).toBe(false)
+  })
+
+  it('refuses to save a month that changed on disk', async () => {
+    await repo.loadAll()
+    await repo.saveTimeMonth('2026-03', [entry('2026-03-10', '08:00', '09:00')])
+    await storage.write(timeMonthPath('2026-03'), storage.files.get(timeMonthPath('2026-03'))!.text)
+    expect(await repo.saveTimeMonth('2026-03', [])).toEqual({ ok: false, reason: 'conflict' })
+    expect(storage.files.has(timeMonthPath('2026-03'))).toBe(true)
+  })
+
+  it('notices a new month file written outside the app', async () => {
+    await repo.loadAll()
+    expect(await repo.hasExternalChanges()).toBe(false)
+    await storage.write(timeMonthPath('2026-04'), JSON.stringify({ schemaVersion: 1, entries: [] }))
+    expect(await repo.hasExternalChanges()).toBe(true)
+  })
+
+  it('loads overlapping entries but warns about the file', async () => {
+    const entries = [entry('2026-03-10', '10:00', '12:00'), entry('2026-03-10', '11:59', '14:00')]
+    await storage.write(timeMonthPath('2026-03'), JSON.stringify({ schemaVersion: 1, entries }))
+    const { timeEntries, warnings } = await repo.loadAll()
+    expect(timeEntries).toHaveLength(2)
+    expect(warnings).toEqual([{ path: timeMonthPath('2026-03'), message: 'has overlapping entries' }])
+  })
+
+  it('rejects entries filed under the wrong month', async () => {
+    await storage.write(timeMonthPath('2026-03'), JSON.stringify({ schemaVersion: 1, entries: [entry('2026-04-01', '10:00', '11:00')] }))
+    const { timeEntries, invalid } = await repo.loadAll()
+    expect(timeEntries).toEqual([])
+    expect(invalid[0]!.message).toContain(timeMonthPath('2026-04'))
+  })
+
+  it('rejects an entry with both a project and a category', async () => {
+    const bad = { ...entry('2026-03-10', '10:00', '11:00'), category: 'other' }
+    await storage.write(timeMonthPath('2026-03'), JSON.stringify({ schemaVersion: 1, entries: [bad] }))
+    const { invalid } = await repo.loadAll()
+    expect(invalid[0]!.message).toMatch(/either "project" or "category"/)
   })
 })

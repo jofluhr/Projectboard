@@ -8,6 +8,7 @@ export function Sidebar() {
   const whiteboards = useStore((s) => s.whiteboards)
   const active = useStore((s) => s.active)
   const invalid = useStore((s) => s.invalid)
+  const warnings = useStore((s) => s.warnings)
   const folderName = useStore((s) => s.folderName)
   const setActive = useStore((s) => s.setActive)
   const pickFolder = useStore((s) => s.pickFolder)
@@ -16,7 +17,7 @@ export function Sidebar() {
   const [showArchived, setShowArchived] = useState(false)
   const today = new Date()
 
-  const isActive = (kind: 'project' | 'whiteboard', id: string) => active?.kind === kind && active.id === id
+  const isActive = (kind: 'project' | 'whiteboard' | 'time', id: string) => active?.kind === kind && active.id === id
   const archivedBoards = whiteboards.filter((w) => w.archived)
   // An open archived board stays visible in the list even when the archive is collapsed.
   const boardsToShow = whiteboards.filter((w) => !w.archived || showArchived || isActive('whiteboard', w.name))
@@ -75,6 +76,40 @@ export function Sidebar() {
           </button>
         )}
 
+        <div className={`${styles.sectionLabel} ${styles.secondSection}`}>Time</div>
+        <nav className={styles.list} aria-label="Time">
+          <button
+            type="button"
+            className={styles.project}
+            aria-current={isActive('time', 'tracker')}
+            onClick={() => setActive({ kind: 'time', id: 'tracker' })}
+          >
+            <ClockIcon />
+            <span className={styles.name}>Tracker</span>
+          </button>
+          <button
+            type="button"
+            className={styles.project}
+            aria-current={isActive('time', 'overview')}
+            onClick={() => setActive({ kind: 'time', id: 'overview' })}
+          >
+            <BarsIcon />
+            <span className={styles.name}>Overview</span>
+          </button>
+        </nav>
+
+        {warnings.length > 0 && (
+          <div className={`${styles.invalid} ${styles.warning}`} role="status">
+            <ul>
+              {warnings.map((f) => (
+                <li key={f.path}>
+                  <span className="mono">{f.path}</span> {f.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {invalid.length > 0 && (
           <div className={styles.invalid} role="alert">
             <strong>
@@ -110,6 +145,23 @@ function BoardIcon() {
       <rect x="1.5" y="2.5" width="5" height="4" rx="1" />
       <rect x="9.5" y="9.5" width="5" height="4" rx="1" />
       <path d="M6.5 4.5h2.5a1.5 1.5 0 0 1 1.5 1.5v3.5" />
+    </svg>
+  )
+}
+
+function ClockIcon() {
+  return (
+    <svg className={styles.icon} viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 4.5V8l2.5 1.5" />
+    </svg>
+  )
+}
+
+function BarsIcon() {
+  return (
+    <svg className={styles.icon} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2.5 13.5h11M4.5 11V8M8 11V3.5M11.5 11V6" />
     </svg>
   )
 }

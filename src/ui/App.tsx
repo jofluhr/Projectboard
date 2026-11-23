@@ -6,6 +6,8 @@ import { NotesPanel } from './notes/NotesPanel'
 import { ProjectHeader } from './ProjectHeader'
 import { Sidebar } from './Sidebar'
 import { Toast } from './Toast'
+import { TimeOverview } from './time/TimeOverview'
+import { TimeTracker } from './time/TimeTracker'
 import { Welcome } from './Welcome'
 import { WhiteboardView } from './whiteboard/WhiteboardView'
 
@@ -45,13 +47,20 @@ function Workspace() {
   const whiteboard = useStore((s) =>
     s.active?.kind === 'whiteboard' ? (s.whiteboards.find((w) => w.name === s.active!.id) ?? null) : null,
   )
+  const timeView = useStore((s) => (s.active?.kind === 'time' ? s.active.id : null))
+  // Changes on every sidebar click, so the Tracker opens on today each time it is picked.
+  const navCount = useStore((s) => s.navCount)
   // Kept across project switches, closed again on every app start.
   const [notesOpen, setNotesOpen] = useState(false)
   return (
     <div className={styles.app}>
       <Sidebar />
       <main className={styles.main}>
-        {whiteboard ? (
+        {timeView === 'tracker' ? (
+          <TimeTracker key={navCount} />
+        ) : timeView === 'overview' ? (
+          <TimeOverview />
+        ) : whiteboard ? (
           <WhiteboardView key={`${whiteboard.archived}/${whiteboard.name}`} board={whiteboard} />
         ) : project ? (
           <>

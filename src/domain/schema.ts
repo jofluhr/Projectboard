@@ -76,9 +76,46 @@ export const LabelSchema = z.object({
   color: z.enum(LABEL_COLORS),
 })
 
+/** Something to book time on that is not a project. */
+export const TimeCategorySchema = z.object({
+  id: z.string().regex(/^[a-z0-9-]+$/, 'Use lowercase letters, digits and dashes'),
+  name: z.string().min(1),
+})
+
+const DEFAULT_TIME_CATEGORIES = [
+  { id: 'fortbildung', name: 'Fortbildung' },
+  { id: 'sonstiges', name: 'Sonstiges' },
+]
+
 export const SettingsSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
   labels: z.array(LabelSchema).default([]),
+  timeCategories: z.array(TimeCategorySchema).default(() => DEFAULT_TIME_CATEGORIES.map((c) => ({ ...c }))),
+})
+
+const clockTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use the format HH:MM')
+
+/** One block of worked time on one day. Booked on either a project or a category. */
+export const TimeEntrySchema = z
+  .object({
+    date: isoDate,
+    start: clockTime,
+    end: clockTime,
+    /** Project id (folder name). */
+    project: z.string().min(1).optional(),
+    /** Category id from settings.json. */
+    category: z.string().min(1).optional(),
+    note: z.string().default(''),
+  })
+  .refine((e) => (e.project === undefined) !== (e.category === undefined), {
+    message: 'Set either "project" or "category"',
+  })
+  .refine((e) => e.end > e.start, { message: 'The end must be after the start', path: ['end'] })
+
+/** Contents of time/YYYY-MM.json. */
+export const TimeMonthSchema = z.object({
+  schemaVersion: z.literal(SCHEMA_VERSION),
+  entries: z.array(TimeEntrySchema).default([]),
 })
 
 export type Priority = z.infer<typeof PrioritySchema>
@@ -89,6 +126,9 @@ export type Project = z.infer<typeof ProjectSchema>
 export type Label = z.infer<typeof LabelSchema>
 export type LabelColor = (typeof LABEL_COLORS)[number]
 export type Settings = z.infer<typeof SettingsSchema>
+export type TimeCategory = z.infer<typeof TimeCategorySchema>
+export type TimeEntry = z.infer<typeof TimeEntrySchema>
+export type TimeMonth = z.infer<typeof TimeMonthSchema>
 
 /** A project as held in the app: its id is the file name without `.json`. */
 export type LoadedProject = Project & { id: string }
@@ -105,6 +145,7 @@ export function defaultSettings(): Settings {
       { id: 'docs', name: 'Docs', color: 'olive' },
       { id: 'research', name: 'Research', color: 'amber' },
     ],
+    timeCategories: DEFAULT_TIME_CATEGORIES.map((c) => ({ ...c })),
   }
 }
 

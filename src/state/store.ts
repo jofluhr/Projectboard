@@ -1,8 +1,9 @@
 import { create } from 'zustand'
 import type { Canvas, LoadedWhiteboard } from '../domain/canvas'
 import { sameFileName } from '../domain/naming'
-import { defaultSettings, type LoadedProject, type Project, type Settings } from '../domain/schema'
-import { ConflictError, Repository, type InvalidFile } from '../repo/repository'
+import { defaultSettings, type LoadedProject, type Project, type Settings, type TimeEntry } from '../domain/schema'
+import { entryKey, monthKey, overlappingKeys, sortEntries, validateEntry } from '../domain/time'
+import { ConflictError, Repository, timeMonthPath, type InvalidFile } from '../repo/repository'
 import { FsAccessStorage } from '../storage/fsAccessStorage'
 import { isFolderAccessSupported, loadFolderHandle, saveFolderHandle } from '../storage/folderHandle'
 
@@ -19,8 +20,11 @@ interface Toast {
   text: string
 }
 
-/** What the main area shows: a project (by id) or a whiteboard (by name). */
-export type Active = { kind: 'project'; id: string } | { kind: 'whiteboard'; id: string }
+/** What the main area shows: a project (by id), a whiteboard (by name) or a time view. */
+export type Active =
+  | { kind: 'project'; id: string }
+  | { kind: 'whiteboard'; id: string }
+  | { kind: 'time'; id: 'tracker' | 'overview' }
 
 interface AppState {
   status: Status
@@ -32,7 +36,13 @@ interface AppState {
   notes: Record<string, string>
   /** Active and archived whiteboards, sorted by name. */
   whiteboards: LoadedWhiteboard[]
+  /** Time entries of all months, sorted by date and start. */
+  timeEntries: TimeEntry[]
+  /** Files that loaded but need attention, e.g. months with overlapping time entries. */
+  warnings: InvalidFile[]
   active: Active | null
+  /** Counts setActive calls, so a view can start fresh each time it is picked in the sidebar. */
+  navCount: number
   toast: Toast | null
 
   boot(): Promise<void>
@@ -54,6 +64,11 @@ interface AppState {
   renameWhiteboard(name: string, newName: string): Promise<boolean>
   setWhiteboardArchived(name: string, archived: boolean): Promise<void>
   deleteWhiteboard(name: string): Promise<void>
+  /** Adds an entry and saves its month. Returns why it was refused, or null. */
+  addTimeEntry(entry: TimeEntry): string | null
+  /** Replaces the entry with key `key`. Returns why it was refused, or null. */
+  updateTimeEntry(key: string, entry: TimeEntry): string | null
+  deleteTimeEntry(key: string): void
   showToast(text: string): void
 }
 
@@ -90,15 +105,16 @@ export const useStore = create<AppState>()((set, get) => {
     if (!repo) return
     for (const timer of whiteboardTimers.values()) clearTimeout(timer)
     whiteboardTimers.clear()
-    const { projects, settings, invalid, notes, migrated, whiteboards } = await repo.loadAll()
+    const { projects, settings, invalid, notes, migrated, whiteboards, timeEntries, warnings } = await repo.loadAll()
     const visible = projects.filter((p) => !p.archived)
     const current = get().active
     const stillThere =
-      current?.kind === 'project'
+      current?.kind === 'time' ||
+      (current?.kind === 'project'
         ? visible.some((p) => p.id === current.id)
-        : current?.kind === 'whiteboard' && whiteboards.some((w) => w.name === current.id)
+        : current?.kind === 'whiteboard' && whiteboards.some((w) => w.name === current.id))
     const fallback = visible[0] ? { kind: 'project' as const, id: visible[0].id } : null
-    set({ projects, settings, invalid, notes, whiteboards, active: stillThere ? current : fallback })
+    set({ projects, settings, invalid, notes, whiteboards, timeEntries, warnings, active: stillThere ? current : fallback })
     if (migrated > 0) notice = `Moved ${migrated} project file${migrated === 1 ? '' : 's'} into project folders.`
     if (notice) get().showToast(notice)
   }
@@ -168,6 +184,33 @@ export const useStore = create<AppState>()((set, get) => {
     return result
   }
 
+  /** Sets the new entry list and saves the given months ("YYYY-MM") in the background. */
+  function commitTime(timeEntries: TimeEntry[], months: string[]) {
+    const unique = [...new Set(months)]
+    set((s) => {
+      const paths = new Set(unique.map(timeMonthPath))
+      const warnings = s.warnings.filter((w) => !paths.has(w.path))
+      for (const month of unique) {
+        if (overlappingKeys(timeEntries.filter((e) => monthKey(e.date) === month)).size > 0) {
+          warnings.push({ path: timeMonthPath(month), message: 'has overlapping entries' })
+        }
+      }
+      return { timeEntries, warnings }
+    })
+    for (const month of unique) {
+      saveQueue = saveQueue.then(async () => {
+        if (!repo) return
+        const entries = get().timeEntries.filter((e) => monthKey(e.date) === month)
+        try {
+          const result = await repo.saveTimeMonth(month, entries)
+          if (!result.ok) await reload(`${timeMonthPath(month)} was changed outside the app. Reloaded from disk; your last change was not saved.`)
+        } catch (e) {
+          get().showToast(`Could not save ${timeMonthPath(month)}: ${errorMessage(e)}`)
+        }
+      })
+    }
+  }
+
   return {
     status: { kind: 'loading' },
     folderName: '',
@@ -176,7 +219,10 @@ export const useStore = create<AppState>()((set, get) => {
     invalid: [],
     notes: {},
     whiteboards: [],
+    timeEntries: [],
+    warnings: [],
     active: null,
+    navCount: 0,
     toast: null,
 
     async boot() {
@@ -232,7 +278,7 @@ export const useStore = create<AppState>()((set, get) => {
 
     setActive(active) {
       get().flushWhiteboards()
-      set({ active })
+      set((s) => ({ active, navCount: s.navCount + 1 }))
     },
 
     async createProject(name) {
@@ -342,6 +388,36 @@ export const useStore = create<AppState>()((set, get) => {
         return true
       })
       if (done) replaceWhiteboard(name, null)
+    },
+
+    addTimeEntry(entry) {
+      const all = get().timeEntries
+      const error = validateEntry(all, entry)
+      if (error) return error
+      commitTime(sortEntries([...all, entry]), [monthKey(entry.date)])
+      return null
+    },
+
+    updateTimeEntry(key, entry) {
+      const all = get().timeEntries
+      const index = all.findIndex((e) => entryKey(e) === key)
+      if (index < 0) return 'This entry no longer exists.'
+      const rest = all.filter((_, i) => i !== index)
+      const error = validateEntry(rest, entry)
+      if (error) return error
+      commitTime(sortEntries([...rest, entry]), [monthKey(all[index]!.date), monthKey(entry.date)])
+      return null
+    },
+
+    deleteTimeEntry(key) {
+      const all = get().timeEntries
+      // Only the first match: a file edited by hand may hold two entries with the same start.
+      const index = all.findIndex((e) => entryKey(e) === key)
+      if (index < 0) return
+      commitTime(
+        all.filter((_, i) => i !== index),
+        [monthKey(all[index]!.date)],
+      )
     },
 
     showToast(text) {

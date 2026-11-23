@@ -138,6 +138,10 @@
 .invalid strong {
   color: var(--danger);
 }
+.warning {
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
 .invalid ul {
   margin: 0;
   padding-left: 16px;
