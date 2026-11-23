@@ -21,11 +21,42 @@
   padding: 6px 8px;
 }
 
+.scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.secondSection {
+  margin-top: 14px;
+}
+
 .list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  overflow-y: auto;
+}
+
+.icon {
+  width: 34px;
+  min-width: 34px;
+  height: 15px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.3;
+}
+
+.archived .name {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.archiveToggle {
+  align-self: flex-start;
+  margin: 4px 8px 0;
+  font-size: 12px;
 }
 
 .project {
@@ -147,6 +178,14 @@
   .foot,
   .count {
     display: none;
+  }
+  .scroll {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .secondSection {
+    margin-top: 0;
   }
   .list {
     flex-direction: row;

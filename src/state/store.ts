@@ -1,6 +1,8 @@
 import { create } from 'zustand'
+import type { Canvas, LoadedWhiteboard } from '../domain/canvas'
+import { sameFileName } from '../domain/naming'
 import { defaultSettings, type LoadedProject, type Project, type Settings } from '../domain/schema'
-import { Repository, type InvalidFile } from '../repo/repository'
+import { ConflictError, Repository, type InvalidFile } from '../repo/repository'
 import { FsAccessStorage } from '../storage/fsAccessStorage'
 import { isFolderAccessSupported, loadFolderHandle, saveFolderHandle } from '../storage/folderHandle'
 
@@ -17,6 +19,9 @@ interface Toast {
   text: string
 }
 
+/** What the main area shows: a project (by id) or a whiteboard (by name). */
+export type Active = { kind: 'project'; id: string } | { kind: 'whiteboard'; id: string }
+
 interface AppState {
   status: Status
   folderName: string
@@ -25,27 +30,43 @@ interface AppState {
   invalid: InvalidFile[]
   /** Notes text per project id; missing means the project has no notes file yet. */
   notes: Record<string, string>
-  activeId: string | null
+  /** Active and archived whiteboards, sorted by name. */
+  whiteboards: LoadedWhiteboard[]
+  active: Active | null
   toast: Toast | null
 
   boot(): Promise<void>
   pickFolder(): Promise<void>
   grantPermission(): Promise<void>
   checkExternalChanges(): Promise<void>
-  setActive(id: string): void
+  setActive(active: Active): void
   createProject(name: string): Promise<void>
   /** Applies `change` right away and saves the project in the background. */
   updateProject(id: string, change: (p: Project) => Project): void
   /** Sets the notes right away and saves them in the background. */
   saveNotes(id: string, text: string): void
+  createWhiteboard(name: string): Promise<void>
+  /** Sets the board's content right away and saves it shortly after the last change. */
+  setWhiteboardCanvas(name: string, canvas: Canvas): void
+  /** Saves pending whiteboard changes now instead of after the delay. */
+  flushWhiteboards(): void
+  /** Resolves to false if the rename was refused (the reason is shown as a toast). */
+  renameWhiteboard(name: string, newName: string): Promise<boolean>
+  setWhiteboardArchived(name: string, archived: boolean): Promise<void>
+  deleteWhiteboard(name: string): Promise<void>
   showToast(text: string): void
 }
+
+/** Whiteboards are saved this long after the last change, so a burst of edits is one write. */
+const WHITEBOARD_SAVE_DELAY_MS = 500
 
 let repo: Repository | null = null
 let pendingHandle: FileSystemDirectoryHandle | null = null
 let booted = false
 /** Saves run one after another so writes never overlap. */
 let saveQueue: Promise<void> = Promise.resolve()
+/** Pending delayed whiteboard saves, by board name. */
+const whiteboardTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -67,13 +88,84 @@ export const useStore = create<AppState>()((set, get) => {
 
   async function reload(notice?: string) {
     if (!repo) return
-    const { projects, settings, invalid, notes, migrated } = await repo.loadAll()
+    for (const timer of whiteboardTimers.values()) clearTimeout(timer)
+    whiteboardTimers.clear()
+    const { projects, settings, invalid, notes, migrated, whiteboards } = await repo.loadAll()
     const visible = projects.filter((p) => !p.archived)
-    const current = get().activeId
-    const activeId = visible.some((p) => p.id === current) ? current : (visible[0]?.id ?? null)
-    set({ projects, settings, invalid, notes, activeId })
+    const current = get().active
+    const stillThere =
+      current?.kind === 'project'
+        ? visible.some((p) => p.id === current.id)
+        : current?.kind === 'whiteboard' && whiteboards.some((w) => w.name === current.id)
+    const fallback = visible[0] ? { kind: 'project' as const, id: visible[0].id } : null
+    set({ projects, settings, invalid, notes, whiteboards, active: stillThere ? current : fallback })
     if (migrated > 0) notice = `Moved ${migrated} project file${migrated === 1 ? '' : 's'} into project folders.`
     if (notice) get().showToast(notice)
+  }
+
+  function findWhiteboard(name: string): LoadedWhiteboard | undefined {
+    return get().whiteboards.find((w) => w.name === name)
+  }
+
+  /** Replaces (or with null removes) a board in the state and follows it with the selection. */
+  function replaceWhiteboard(name: string, next: LoadedWhiteboard | null) {
+    set((s) => {
+      const rest = s.whiteboards.filter((w) => w.name !== name)
+      const whiteboards = (next ? [...rest, next] : rest).sort((a, b) => a.name.localeCompare(b.name))
+      let active = s.active
+      if (active?.kind === 'whiteboard' && active.id === name) {
+        const firstProject = s.projects.find((p) => !p.archived)
+        active = next
+          ? { kind: 'whiteboard', id: next.name }
+          : firstProject
+            ? { kind: 'project', id: firstProject.id }
+            : null
+      }
+      return { whiteboards, active }
+    })
+  }
+
+  /**
+   * After a board's file was moved (renamed or (un)archived): updates the state, keeping
+   * edits made while the move ran, and saves those edits to the new file.
+   */
+  function afterMove(oldName: string, moved: LoadedWhiteboard, before: LoadedWhiteboard) {
+    const latest = findWhiteboard(oldName) ?? before
+    clearTimeout(whiteboardTimers.get(oldName))
+    whiteboardTimers.delete(oldName)
+    replaceWhiteboard(oldName, { ...latest, name: moved.name, archived: moved.archived })
+    if (latest.canvas !== before.canvas) queueWhiteboardSave(moved.name)
+  }
+
+  /** Queues a save of the board as it is in the state when the save runs. */
+  function queueWhiteboardSave(name: string) {
+    saveQueue = saveQueue.then(async () => {
+      const latest = findWhiteboard(name)
+      if (!repo || !latest) return
+      try {
+        const result = await repo.saveWhiteboard(latest)
+        if (!result.ok) await reload(`"${name}" was changed outside the app. Reloaded from disk; your last change was not saved.`)
+      } catch (e) {
+        get().showToast(`Could not save "${name}": ${errorMessage(e)}`)
+      }
+    })
+  }
+
+  /** Runs a whiteboard file operation after all pending saves. Errors become toasts. */
+  function runWhiteboardOp<T>(what: string, op: (repo: Repository) => Promise<T>): Promise<T | undefined> {
+    get().flushWhiteboards()
+    const result = saveQueue.then(async () => {
+      if (!repo) return undefined
+      try {
+        return await op(repo)
+      } catch (e) {
+        if (e instanceof ConflictError) await reload(`${errorMessage(e)} Reloaded from disk.`)
+        else get().showToast(`Could not ${what}: ${errorMessage(e)}`)
+        return undefined
+      }
+    })
+    saveQueue = result.then(() => undefined)
+    return result
   }
 
   return {
@@ -83,7 +175,8 @@ export const useStore = create<AppState>()((set, get) => {
     settings: defaultSettings(),
     invalid: [],
     notes: {},
-    activeId: null,
+    whiteboards: [],
+    active: null,
     toast: null,
 
     async boot() {
@@ -128,6 +221,7 @@ export const useStore = create<AppState>()((set, get) => {
 
     async checkExternalChanges() {
       if (!repo || get().status.kind !== 'ready') return
+      get().flushWhiteboards()
       await saveQueue
       try {
         if (await repo.hasExternalChanges()) await reload('Files changed outside the app. Reloaded from disk.')
@@ -136,8 +230,9 @@ export const useStore = create<AppState>()((set, get) => {
       }
     },
 
-    setActive(id) {
-      set({ activeId: id })
+    setActive(active) {
+      get().flushWhiteboards()
+      set({ active })
     },
 
     async createProject(name) {
@@ -146,7 +241,7 @@ export const useStore = create<AppState>()((set, get) => {
         const project = await repo.createProject(name, get().projects)
         set((s) => ({
           projects: [...s.projects, project].sort((a, b) => a.name.localeCompare(b.name)),
-          activeId: project.id,
+          active: { kind: 'project', id: project.id },
         }))
       } catch (e) {
         get().showToast(`Could not create the project: ${errorMessage(e)}`)
@@ -186,6 +281,67 @@ export const useStore = create<AppState>()((set, get) => {
           get().showToast(`Could not save the notes of "${name}": ${errorMessage(e)}`)
         }
       })
+    },
+
+    async createWhiteboard(name) {
+      const board = await runWhiteboardOp('create the whiteboard', (r) => r.createWhiteboard(name))
+      if (!board) return
+      replaceWhiteboard(board.name, board)
+      set({ active: { kind: 'whiteboard', id: board.name } })
+    },
+
+    setWhiteboardCanvas(name, canvas) {
+      const board = findWhiteboard(name)
+      if (!board || board.canvas === canvas) return
+      replaceWhiteboard(name, { ...board, canvas })
+      clearTimeout(whiteboardTimers.get(name))
+      whiteboardTimers.set(
+        name,
+        setTimeout(() => {
+          whiteboardTimers.delete(name)
+          queueWhiteboardSave(name)
+        }, WHITEBOARD_SAVE_DELAY_MS),
+      )
+    },
+
+    flushWhiteboards() {
+      for (const [name, timer] of whiteboardTimers) {
+        clearTimeout(timer)
+        queueWhiteboardSave(name)
+      }
+      whiteboardTimers.clear()
+    },
+
+    async renameWhiteboard(name, newName) {
+      const board = findWhiteboard(name)
+      if (!board) return false
+      if (newName.trim() === name) return true
+      const renamed = await runWhiteboardOp('rename the whiteboard', (r) => r.renameWhiteboard(board, newName))
+      if (!renamed) return false
+      afterMove(name, renamed, board)
+      if (!sameFileName(renamed.name, newName.trim())) {
+        get().showToast(`Saved as "${renamed.name}" because some characters can't be used in file names.`)
+      }
+      return true
+    },
+
+    async setWhiteboardArchived(name, archived) {
+      const board = findWhiteboard(name)
+      if (!board) return
+      const moved = await runWhiteboardOp(archived ? 'archive the whiteboard' : 'restore the whiteboard', (r) =>
+        r.setWhiteboardArchived(board, archived),
+      )
+      if (moved) afterMove(name, moved, board)
+    },
+
+    async deleteWhiteboard(name) {
+      const board = findWhiteboard(name)
+      if (!board) return
+      const done = await runWhiteboardOp('delete the whiteboard', async (r) => {
+        await r.deleteWhiteboard(board)
+        return true
+      })
+      if (done) replaceWhiteboard(name, null)
     },
 
     showToast(text) {

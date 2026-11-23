@@ -36,3 +36,25 @@ export function deriveKey(name: string, taken: Iterable<string>): string {
   }
   throw new Error('No free project key')
 }
+
+/** Windows refuses these as file names, whatever the extension. */
+const RESERVED_NAMES = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i
+
+/**
+ * Turns a whiteboard name into a name that works as a file name on every system:
+ * removes characters Windows does not allow and trailing dots and spaces, collapses
+ * whitespace. Returns '' if nothing usable is left.
+ */
+export function sanitizeFileName(name: string): string {
+  const cleaned = name
+    .replace(/[<>:"/\|?*\u0000-\u001f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/, '')
+    .slice(0, 100)
+    .trim()
+  return RESERVED_NAMES.test(cleaned) ? `${cleaned}_` : cleaned
+}
+
+/** File names that differ only in upper and lower case are the same file on Windows and macOS. */
+export const sameFileName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()

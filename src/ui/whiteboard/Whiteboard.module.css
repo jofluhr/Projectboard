@@ -1,0 +1,373 @@
+.view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 34px;
+}
+.header h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  min-width: 0;
+}
+
+.title {
+  border: 0;
+  background: none;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font: inherit;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.title:hover {
+  background: var(--surface-2);
+}
+
+.renameInput {
+  font-size: 20px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--surface);
+  min-width: 0;
+  width: min(420px, 100%);
+}
+
+.badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.headerActions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.danger {
+  color: var(--danger);
+}
+
+/* Canvas */
+.canvasFrame {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+/* React Flow follows the app's colours, light and dark. */
+.flow {
+  --xy-background-color: var(--surface-2);
+  --xy-background-pattern-color: var(--line);
+  --xy-edge-stroke: var(--muted);
+  --xy-edge-stroke-selected: var(--accent);
+  --xy-connectionline-stroke: var(--accent);
+  --xy-handle-background-color: var(--surface);
+  --xy-handle-border-color: var(--accent);
+  --xy-selection-background-color: color-mix(in srgb, var(--accent) 10%, transparent);
+  --xy-selection-border: 1px dashed var(--accent);
+  --xy-minimap-background-color: var(--surface);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--bg) 60%, transparent);
+  --xy-minimap-node-background-color: var(--line);
+  --xy-controls-button-background-color: var(--surface);
+  --xy-controls-button-background-color-hover: var(--surface-2);
+  --xy-controls-button-color: var(--fg);
+  --xy-controls-button-color-hover: var(--fg);
+  --xy-controls-button-border-color: var(--line);
+  --xy-attribution-background-color: transparent;
+  --xy-resize-background-color: var(--accent);
+  color: var(--fg);
+}
+
+/* Cards */
+.card {
+  --c: var(--line);
+  width: 100%;
+  height: 100%;
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+.colored {
+  border-color: var(--c);
+  background: color-mix(in srgb, var(--c) 12%, var(--surface));
+}
+.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cardBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 14px;
+  overflow-wrap: anywhere;
+  cursor: default;
+}
+.cardBody > :first-child {
+  margin-top: 0;
+}
+.cardBody > :last-child {
+  margin-bottom: 0;
+}
+.cardBody h1,
+.cardBody h2,
+.cardBody h3 {
+  margin: 0.4em 0 0.3em;
+  line-height: 1.2;
+}
+.cardBody h1 {
+  font-size: 1.4em;
+}
+.cardBody h2 {
+  font-size: 1.2em;
+}
+.cardBody h3 {
+  font-size: 1.05em;
+}
+.cardBody p,
+.cardBody ul,
+.cardBody ol {
+  margin: 0.4em 0;
+}
+.cardBody ul,
+.cardBody ol {
+  padding-left: 1.3em;
+}
+.cardBody code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--surface-2);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.cardBody a {
+  color: var(--accent);
+}
+
+.cardEmpty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.editor {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  resize: none;
+  border: 0;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+  cursor: text;
+}
+
+/* Connection points: visible when hovering a card or while connecting. */
+.handle {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--accent);
+  background: var(--surface);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+:global(.react-flow__node):hover .handle,
+:global(.react-flow__node.selected) .handle,
+:global(.react-flow.connecting) .handle {
+  opacity: 1;
+}
+
+.resizeLine {
+  border-color: transparent !important;
+}
+.resizeHandle {
+  width: 9px !important;
+  height: 9px !important;
+  border-radius: 2px;
+  background: var(--accent) !important;
+  border: 1.5px solid var(--surface) !important;
+}
+
+/* Nodes from other tools */
+.placeholder {
+  --c: var(--line);
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1.5px dashed var(--muted);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--muted);
+  overflow: hidden;
+}
+.group {
+  --c: var(--muted);
+  width: 100%;
+  height: 100%;
+  padding: 6px 10px;
+  border: 1.5px dashed var(--c);
+  border-radius: calc(var(--radius) + 4px);
+  background: color-mix(in srgb, var(--c) 6%, transparent);
+  color: var(--muted);
+}
+.group.colored {
+  background: color-mix(in srgb, var(--c) 8%, transparent);
+}
+.placeholderType {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.placeholderDetail {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 6px;
+}
+
+/* Connections */
+.edgeLabel {
+  position: absolute;
+  pointer-events: all;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-size: 12px;
+  max-width: 220px;
+  white-space: pre-wrap;
+  text-align: center;
+  color: var(--fg);
+}
+.edgeLabelSelected {
+  border-color: var(--accent);
+}
+.labelInput {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  outline: none;
+  text-align: center;
+  padding: 0;
+}
+
+/* Toolbar */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  margin: 10px !important;
+  max-width: calc(100% - 20px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.toolbar :global(.btn) {
+  padding: 3px 9px;
+}
+.toolbar :global(.btn):disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--line);
+  margin: 0 2px;
+}
+
+.swatches {
+  display: flex;
+  gap: 4px;
+}
+.swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.swatch[aria-pressed='true'] {
+  box-shadow: 0 0 0 2px var(--fg);
+}
+.swatchNone {
+  background: linear-gradient(135deg, var(--surface) 45%, var(--muted) 45% 55%, var(--surface) 55%);
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.segmented button {
+  border: 0;
+  background: var(--surface);
+  padding: 2px 9px;
+  font-weight: 700;
+}
+.segmented button + button {
+  border-left: 1px solid var(--line);
+}
+.segmented button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.emptyHint {
+  margin-top: 70px !important;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  max-width: min(460px, calc(100% - 32px));
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .header {
+    flex-wrap: wrap;
+  }
+}

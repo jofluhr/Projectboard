@@ -1,6 +1,7 @@
 import type { z } from 'zod'
+import { CanvasSchema, emptyCanvas, type LoadedWhiteboard } from '../domain/canvas'
 import { newProject, normalizeProject } from '../domain/ops'
-import { deriveKey, uniqueSlug } from '../domain/naming'
+import { deriveKey, sameFileName, sanitizeFileName, uniqueSlug } from '../domain/naming'
 import {
   defaultSettings,
   formatIssues,
@@ -19,6 +20,12 @@ export const PROJECTS_DIR = 'projects'
 /** Each project lives in its own folder, named by the project id. */
 export const projectPath = (id: string) => `${PROJECTS_DIR}/${id}/${id}.json`
 export const notesPath = (id: string) => `${PROJECTS_DIR}/${id}/Notes_${id}.md`
+export const WHITEBOARDS_DIR = 'whiteboards'
+export const ARCHIVED_WHITEBOARDS_DIR = `${WHITEBOARDS_DIR}/archived`
+const CANVAS_EXT = '.canvas'
+/** A whiteboard's file name is its name; archived boards live in a subfolder. */
+export const whiteboardPath = (name: string, archived = false) =>
+  `${archived ? ARCHIVED_WHITEBOARDS_DIR : WHITEBOARDS_DIR}/${name}${CANVAS_EXT}`
 /** Where projects were stored before they got their own folders. */
 const legacyProjectPath = (id: string) => `${PROJECTS_DIR}/${id}.json`
 
@@ -35,9 +42,14 @@ export interface LoadResult {
   notes: Record<string, string>
   /** Number of project files moved from the old flat layout into project folders. */
   migrated: number
+  /** Active and archived whiteboards, sorted by name. */
+  whiteboards: LoadedWhiteboard[]
 }
 
 export type SaveResult = { ok: true } | { ok: false; reason: 'conflict' }
+
+/** A file changed on disk since it was last read, so the app must reload before touching it. */
+export class ConflictError extends Error {}
 
 const toJson = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`
 
@@ -108,7 +120,28 @@ export class Repository {
       }
     }
     projects.sort((a, b) => a.name.localeCompare(b.name))
-    return { projects, settings, invalid, notes, migrated }
+
+    const whiteboards: LoadedWhiteboard[] = []
+    for (const archived of [false, true]) {
+      for (const name of await this.whiteboardNamesOnDisk(archived)) {
+        const path = whiteboardPath(name, archived)
+        const content = await this.storage.read(path)
+        if (!content) continue
+        this.seen.set(path, content.lastModified)
+        // Obsidian writes an empty file for a new canvas.
+        const parsed =
+          content.text.trim() === '' ? { ok: true as const, value: emptyCanvas() } : parseJson(content.text, CanvasSchema)
+        if (parsed.ok) whiteboards.push({ name, archived, canvas: parsed.value })
+        else invalid.push({ path, message: parsed.message })
+      }
+    }
+    whiteboards.sort((a, b) => a.name.localeCompare(b.name))
+    return { projects, settings, invalid, notes, migrated, whiteboards }
+  }
+
+  private async whiteboardNamesOnDisk(archived: boolean): Promise<string[]> {
+    const dir = archived ? ARCHIVED_WHITEBOARDS_DIR : WHITEBOARDS_DIR
+    return (await this.storage.list(dir)).filter((f) => f.endsWith(CANVAS_EXT)).map((f) => f.slice(0, -CANVAS_EXT.length))
   }
 
   /** Moves `projects/<id>.json` to `projects/<id>/<id>.json`. Never overwrites a file. */
@@ -151,6 +184,86 @@ export class Repository {
     return this.saveFile(notesPath(id), text)
   }
 
+  /** Writes a whiteboard unless its file changed on disk since it was last read or written. */
+  async saveWhiteboard(board: LoadedWhiteboard): Promise<SaveResult> {
+    return this.saveFile(whiteboardPath(board.name, board.archived), toJson(board.canvas))
+  }
+
+  /** Creates an empty whiteboard. Throws if the name is empty or already used. */
+  async createWhiteboard(name: string): Promise<LoadedWhiteboard> {
+    const fileName = await this.freeWhiteboardName(name, false)
+    const board: LoadedWhiteboard = { name: fileName, archived: false, canvas: emptyCanvas() }
+    const result = await this.saveWhiteboard(board)
+    if (!result.ok) throw new Error(`A file named ${whiteboardPath(fileName)} appeared while creating the whiteboard`)
+    return board
+  }
+
+  /** Renames the board's file. Throws if the new name is empty or used by another board. */
+  async renameWhiteboard(board: LoadedWhiteboard, newName: string): Promise<LoadedWhiteboard> {
+    const fileName = await this.freeWhiteboardName(newName, board.archived, board.name)
+    if (fileName === board.name) return board
+    await this.moveFile(whiteboardPath(board.name, board.archived), whiteboardPath(fileName, board.archived))
+    return { ...board, name: fileName }
+  }
+
+  /** Moves the board into or out of the archive folder. */
+  async setWhiteboardArchived(board: LoadedWhiteboard, archived: boolean): Promise<LoadedWhiteboard> {
+    if (board.archived === archived) return board
+    await this.freeWhiteboardName(board.name, archived)
+    await this.moveFile(whiteboardPath(board.name, board.archived), whiteboardPath(board.name, archived))
+    return { ...board, archived }
+  }
+
+  /** Deletes the board's file for good. */
+  async deleteWhiteboard(board: LoadedWhiteboard): Promise<void> {
+    const path = whiteboardPath(board.name, board.archived)
+    this.assertUnchanged(path, await this.storage.stat(path))
+    await this.storage.remove(path)
+    this.seen.delete(path)
+  }
+
+  /**
+   * Cleans up `name` for use as a file name and checks that no other board in the target
+   * folder uses it (ignoring case, as Windows does). `ownName` is the board being renamed.
+   */
+  private async freeWhiteboardName(name: string, archived: boolean, ownName?: string): Promise<string> {
+    const fileName = sanitizeFileName(name)
+    if (!fileName) throw new Error('Please enter a name with at least one letter or digit.')
+    const taken = (await this.whiteboardNamesOnDisk(archived)).filter((n) => n !== ownName)
+    if (taken.some((n) => sameFileName(n, fileName))) {
+      throw new Error(`There is already ${archived ? 'an archived' : 'a'} whiteboard named "${fileName}".`)
+    }
+    return fileName
+  }
+
+  /**
+   * Moves a file by writing the new one and then removing the old one. Refuses if the
+   * source changed on disk. A move that only changes upper/lower case goes through a
+   * temporary name, because on Windows both names are the same file.
+   */
+  private async moveFile(from: string, to: string): Promise<void> {
+    const content = await this.storage.read(from)
+    this.assertUnchanged(from, content?.lastModified ?? null)
+    if (!content) return
+    if (sameFileName(from, to)) {
+      const temp = `${to}.renaming`
+      await this.storage.write(temp, content.text)
+      await this.storage.remove(from)
+      this.seen.set(to, await this.storage.write(to, content.text))
+      await this.storage.remove(temp)
+    } else {
+      this.seen.set(to, await this.storage.write(to, content.text))
+      await this.storage.remove(from)
+    }
+    this.seen.delete(from)
+  }
+
+  private assertUnchanged(path: string, onDisk: number | null) {
+    if (onDisk !== (this.seen.get(path) ?? null)) {
+      throw new ConflictError(`${path} was changed outside the app.`)
+    }
+  }
+
   private async saveFile(path: string, text: string): Promise<SaveResult> {
     const onDisk = await this.storage.stat(path)
     if (onDisk !== (this.seen.get(path) ?? null)) return { ok: false, reason: 'conflict' }
@@ -179,6 +292,11 @@ export class Repository {
     if ((await this.legacyProjectFiles()).length > 0) return true
     for (const id of await this.storage.listDirs(PROJECTS_DIR)) {
       if ((await isNew(projectPath(id))) || (await isNew(notesPath(id)))) return true
+    }
+    for (const archived of [false, true]) {
+      for (const name of await this.whiteboardNamesOnDisk(archived)) {
+        if (await isNew(whiteboardPath(name, archived))) return true
+      }
     }
     return false
   }
@@ -214,6 +332,9 @@ the version on disk wins.
     first written.
   Card numbers (\`num\`) must be unique within a project; \`nextNumber\` is the
   number the next new card gets.
+- \`whiteboards/<name>.canvas\`: brainstorming boards in the open JSON Canvas
+  format (jsoncanvas.org), so they also open in other canvas tools. The file
+  name is the board name. Archived boards are in \`whiteboards/archived/\`.
 
 Tip: make this folder a local git repository to keep a history of every change.
 `

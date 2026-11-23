@@ -20,6 +20,13 @@
   --label-amber: #a86400;
   --label-teal: #16796f;
   --label-gray: #5f6b78;
+  /* Whiteboard colours: the six JSON Canvas presets (red, orange, yellow, green, cyan, purple). */
+  --canvas-1: #d04a3f;
+  --canvas-2: #d9792b;
+  --canvas-3: #c9a227;
+  --canvas-4: #3f9a5a;
+  --canvas-5: #2a9bb0;
+  --canvas-6: #8a5cc2;
   --shadow: 0 1px 0 rgba(16, 24, 32, 0.05), 0 1px 3px rgba(16, 24, 32, 0.09);
   --shadow-lift: 0 10px 28px rgba(16, 24, 32, 0.18);
   --font-ui: 'Manrope Variable', system-ui, 'Segoe UI', Roboto, sans-serif;
@@ -50,6 +57,12 @@
     --label-amber: #e8a952;
     --label-teal: #5fc8b8;
     --label-gray: #a3b0bd;
+    --canvas-1: #f0837a;
+    --canvas-2: #f0a35e;
+    --canvas-3: #e6c95a;
+    --canvas-4: #74c98d;
+    --canvas-5: #63c3d6;
+    --canvas-6: #b896e6;
     --shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
     --shadow-lift: 0 10px 28px rgba(0, 0, 0, 0.5);
     color-scheme: dark;

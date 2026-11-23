@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { addCard } from '../domain/ops'
 import { MemoryStorage } from '../storage/memoryStorage'
-import { INBOX_FILE, notesPath, projectPath, README_FILE, Repository, SETTINGS_FILE } from './repository'
+import { ConflictError, INBOX_FILE, notesPath, projectPath, README_FILE, Repository, SETTINGS_FILE, whiteboardPath } from './repository'
+import { addCard as addCanvasCard } from '../domain/canvasOps'
 
 const NOW = new Date('2026-03-10T09:00:00Z')
 
@@ -215,5 +216,94 @@ describe('notes', () => {
     expect(await repo.hasExternalChanges()).toBe(true)
     expect(await repo.saveNotes(id, 'mine')).toEqual({ ok: false, reason: 'conflict' })
     expect(storage.files.get(notesPath(id))!.text).toBe('edited again')
+  })
+})
+
+describe('whiteboards', () => {
+  beforeEach(() => repo.initialize())
+
+  it('creates, loads and saves a board as a JSON Canvas file named after the board', async () => {
+    const board = await repo.createWhiteboard('App architecture')
+    expect(board).toEqual({ name: 'App architecture', archived: false, canvas: { nodes: [], edges: [] } })
+    expect(JSON.parse(storage.files.get(whiteboardPath('App architecture'))!.text)).toEqual({ nodes: [], edges: [] })
+
+    const canvas = addCanvasCard(board.canvas, { x: 0, y: 0 }, 'Hello', 'n1').canvas
+    expect(await repo.saveWhiteboard({ ...board, canvas })).toEqual({ ok: true })
+
+    const { whiteboards, invalid } = await new Repository(storage).loadAll()
+    expect(invalid).toEqual([])
+    expect(whiteboards).toEqual([{ name: 'App architecture', archived: false, canvas }])
+  })
+
+  it('loads empty files (as other tools write them) and reports broken ones', async () => {
+    await storage.write(whiteboardPath('Empty'), '')
+    await storage.write(whiteboardPath('Broken'), '{"nodes": [{"id": "x"}]}')
+    const { whiteboards, invalid } = await repo.loadAll()
+    expect(whiteboards.map((w) => w.name)).toEqual(['Empty'])
+    expect(invalid.map((f) => f.path)).toEqual([whiteboardPath('Broken')])
+  })
+
+  it('refuses empty and taken names, ignoring case', async () => {
+    await repo.createWhiteboard('Ideas')
+    await expect(repo.createWhiteboard(' ?? ')).rejects.toThrow(/at least one letter/)
+    await expect(repo.createWhiteboard('IDEAS')).rejects.toThrow(/already a whiteboard named "IDEAS"/)
+  })
+
+  it('renames the file, also when only the case changes', async () => {
+    await repo.loadAll()
+    const board = await repo.createWhiteboard('Ideas')
+    await repo.createWhiteboard('Other')
+    await expect(repo.renameWhiteboard(board, 'other')).rejects.toThrow(/already/)
+
+    const renamed = await repo.renameWhiteboard(board, 'Ideas: round 2')
+    expect(renamed.name).toBe('Ideas round 2')
+    expect(storage.files.has(whiteboardPath('Ideas'))).toBe(false)
+    expect(storage.files.has(whiteboardPath('Ideas round 2'))).toBe(true)
+
+    const recased = await repo.renameWhiteboard(renamed, 'IDEAS ROUND 2')
+    expect(recased.name).toBe('IDEAS ROUND 2')
+    expect([...storage.files.keys()].filter((p) => p.startsWith('whiteboards/'))).toEqual([
+      whiteboardPath('Other'),
+      whiteboardPath('IDEAS ROUND 2'),
+    ])
+    // Saving after a rename writes the new file without a conflict.
+    expect(await repo.saveWhiteboard(recased)).toEqual({ ok: true })
+    expect(await repo.hasExternalChanges()).toBe(false)
+  })
+
+  it('archives into a subfolder, restores and deletes', async () => {
+    const board = await repo.createWhiteboard('Old ideas')
+    const archived = await repo.setWhiteboardArchived(board, true)
+    expect(storage.files.has(whiteboardPath('Old ideas', true))).toBe(true)
+    expect(storage.files.has(whiteboardPath('Old ideas'))).toBe(false)
+    expect((await new Repository(storage).loadAll()).whiteboards).toEqual([archived])
+
+    // A new board may reuse the name; restoring the old one is then refused.
+    const again = await repo.createWhiteboard('Old ideas')
+    await expect(repo.setWhiteboardArchived(archived, false)).rejects.toThrow(/already a whiteboard/)
+    await repo.deleteWhiteboard(again)
+    const restored = await repo.setWhiteboardArchived(archived, false)
+    expect(restored.archived).toBe(false)
+
+    await repo.deleteWhiteboard(restored)
+    expect([...storage.files.keys()].some((p) => p.startsWith('whiteboards/'))).toBe(false)
+  })
+
+  it('refuses to save, move or delete a board changed outside the app', async () => {
+    const board = await repo.createWhiteboard('Shared')
+    await storage.write(whiteboardPath('Shared'), '{"nodes": [], "edges": []}\n')
+    expect(await repo.hasExternalChanges()).toBe(true)
+    expect(await repo.saveWhiteboard(board)).toEqual({ ok: false, reason: 'conflict' })
+    await expect(repo.renameWhiteboard(board, 'Renamed')).rejects.toBeInstanceOf(ConflictError)
+    await expect(repo.setWhiteboardArchived(board, true)).rejects.toBeInstanceOf(ConflictError)
+    await expect(repo.deleteWhiteboard(board)).rejects.toBeInstanceOf(ConflictError)
+    expect(storage.files.has(whiteboardPath('Shared'))).toBe(true)
+  })
+
+  it('notices new board files', async () => {
+    await repo.loadAll()
+    expect(await repo.hasExternalChanges()).toBe(false)
+    await storage.write(whiteboardPath('From elsewhere', true), '{}')
+    expect(await repo.hasExternalChanges()).toBe(true)
   })
 })

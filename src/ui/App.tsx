@@ -7,6 +7,7 @@ import { ProjectHeader } from './ProjectHeader'
 import { Sidebar } from './Sidebar'
 import { Toast } from './Toast'
 import { Welcome } from './Welcome'
+import { WhiteboardView } from './whiteboard/WhiteboardView'
 
 export function App() {
   const ready = useStore((s) => s.status.kind === 'ready')
@@ -18,7 +19,9 @@ export function App() {
   // Files may be edited outside the app (e.g. by Claude). Check when the window comes back.
   useEffect(() => {
     const check = () => void useStore.getState().checkExternalChanges()
-    const onVisible = () => document.visibilityState === 'visible' && check()
+    // Whiteboards save with a short delay; write pending changes before the tab is hidden or closed.
+    const onVisible = () =>
+      document.visibilityState === 'visible' ? check() : useStore.getState().flushWhiteboards()
     window.addEventListener('focus', check)
     document.addEventListener('visibilitychange', onVisible)
     return () => {
@@ -36,14 +39,21 @@ export function App() {
 }
 
 function Workspace() {
-  const project = useStore((s) => s.projects.find((p) => p.id === s.activeId) ?? null)
+  const project = useStore((s) =>
+    s.active?.kind === 'project' ? (s.projects.find((p) => p.id === s.active!.id) ?? null) : null,
+  )
+  const whiteboard = useStore((s) =>
+    s.active?.kind === 'whiteboard' ? (s.whiteboards.find((w) => w.name === s.active!.id) ?? null) : null,
+  )
   // Kept across project switches, closed again on every app start.
   const [notesOpen, setNotesOpen] = useState(false)
   return (
     <div className={styles.app}>
       <Sidebar />
       <main className={styles.main}>
-        {project ? (
+        {whiteboard ? (
+          <WhiteboardView key={`${whiteboard.archived}/${whiteboard.name}`} board={whiteboard} />
+        ) : project ? (
           <>
             <ProjectHeader project={project} />
             <NotesPanel key={project.id} projectId={project.id} open={notesOpen} onToggle={() => setNotesOpen((o) => !o)} />
